@@ -31,15 +31,61 @@ struct AppshotRecord: Codable, Identifiable, Equatable {
     }
 }
 
+struct AppshotCaptureManifest: Codable, Equatable {
+    static let schemaVersion = 1
+
+    var version: Int
+    var captureID: String
+    var createdAt: Date
+    var appName: String
+    var bundleID: String
+    var pid: Int32
+    var windowTitle: String
+    var nodeCount: Int
+    var screenshotPath: String?
+    var contentPath: String
+    var markup: String
+
+    init(record: AppshotRecord) {
+        version = Self.schemaVersion
+        captureID = record.id
+        createdAt = record.createdAt
+        appName = record.appName
+        bundleID = record.bundleID
+        pid = record.pid
+        windowTitle = record.windowTitle
+        nodeCount = record.nodeCount
+        screenshotPath = record.screenshotPath
+        contentPath = record.axTextPath
+        markup = record.appshotMarkup
+    }
+}
+
 struct AppshotStore {
+    static let captureCompletedNotification = Notification.Name(
+        "com.kwwk.appshots.captureCompleted"
+    )
+
     private var fileManager: FileManager { .default }
 
     var rootURL: URL {
         URL(fileURLWithPath: "/tmp/appshots", isDirectory: true)
     }
 
+    var latestCaptureManifestURL: URL {
+        rootURL.appendingPathComponent("latest.json")
+    }
+
     func ensureRootDirectory() throws {
-        try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        try fileManager.createDirectory(
+            at: rootURL,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        try fileManager.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: rootURL.path
+        )
     }
 
     func removeCapture(_ record: AppshotRecord) throws {
@@ -52,6 +98,13 @@ struct AppshotStore {
         if fileManager.fileExists(atPath: axTextURL.path) {
             try fileManager.removeItem(at: axTextURL)
         }
+    }
+
+    func clearLatestCaptureManifest() throws {
+        guard fileManager.fileExists(atPath: latestCaptureManifestURL.path) else {
+            return
+        }
+        try fileManager.removeItem(at: latestCaptureManifestURL)
     }
 
     func save(
@@ -82,8 +135,9 @@ struct AppshotStore {
         )
 
         try storedOutput.text.write(to: axTextURL, atomically: true, encoding: .utf8)
+        try restrictFilePermissions(at: axTextURL)
 
-        return AppshotRecord(
+        let record = AppshotRecord(
             id: "\(fileBaseName)-\(captureNumber)",
             createdAt: Date(),
             appName: appName,
@@ -97,6 +151,33 @@ struct AppshotStore {
             axTextPath: axTextURL.path,
             fileBaseName: fileBaseName,
             captureNumber: captureNumber
+        )
+        try publishLatestCapture(record)
+        return record
+    }
+
+    private func publishLatestCapture(_ record: AppshotRecord) throws {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+
+        let manifest = AppshotCaptureManifest(record: record)
+        let data = try encoder.encode(manifest)
+        try data.write(to: latestCaptureManifestURL, options: .atomic)
+        try restrictFilePermissions(at: latestCaptureManifestURL)
+
+        DistributedNotificationCenter.default().postNotificationName(
+            Self.captureCompletedNotification,
+            object: nil,
+            userInfo: ["manifestPath": latestCaptureManifestURL.path],
+            deliverImmediately: true
+        )
+    }
+
+    private func restrictFilePermissions(at url: URL) throws {
+        try fileManager.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: url.path
         )
     }
 
@@ -130,6 +211,8 @@ struct AppshotStore {
         guard CGImageDestinationFinalize(destination) else {
             throw AppshotStoreError.unreadableScreenshot(sourceURL.path)
         }
+
+        try restrictFilePermissions(at: destinationURL)
 
         return destinationURL
     }
