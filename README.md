@@ -11,3 +11,31 @@ Press left Option + right Option to capture the frontmost app, or use the menu b
 <p>
   <img src="Resources/Media/appshots-demo.webp" width="720" alt="Appshots demo">
 </p>
+
+## Integrations
+
+After every successful capture, Appshots atomically publishes a machine-readable
+manifest at `/tmp/appshots/latest.json`. Integrations can watch that file or use
+the `com.kwwk.appshots.captureCompleted` distributed notification as a wake-up
+signal, then read the manifest as the source of truth.
+
+```json
+{
+  "version": 1,
+  "captureID": "Safari-1",
+  "createdAt": "2026-05-24T12:00:00Z",
+  "appName": "Safari",
+  "bundleID": "com.apple.Safari",
+  "pid": 1234,
+  "windowTitle": "Example",
+  "nodeCount": 42,
+  "screenshotPath": "/tmp/appshots/Safari-1.png",
+  "contentPath": "/tmp/appshots/Safari-axtree-1.txt",
+  "markup": "[app-shots image=\"/tmp/appshots/Safari-1.png\" content=\"/tmp/appshots/Safari-axtree-1.txt\" ]"
+}
+```
+
+`version` identifies the manifest schema. The referenced files and manifest are
+private to the current user. They remain temporary: Appshots retains at most ten
+captures and removes captures from the current session when it quits, so an
+integration should copy files it needs promptly.

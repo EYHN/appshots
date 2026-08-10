@@ -37,6 +37,7 @@ final class AppshotsModel: ObservableObject {
     func startSession() {
         do {
             try store.ensureRootDirectory()
+            try store.clearLatestCaptureManifest()
             recentCaptures = []
             statusMessage = "Ready"
         } catch {
@@ -49,6 +50,7 @@ final class AppshotsModel: ObservableObject {
         for record in recentCaptures {
             try? store.removeCapture(record)
         }
+        try? store.clearLatestCaptureManifest()
         recentCaptures = []
     }
 
